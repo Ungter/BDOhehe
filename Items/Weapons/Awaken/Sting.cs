@@ -72,19 +72,21 @@ namespace BDOhehe.Items.Weapons.Awaken {
 
        
 
-        // Count the number of hits
-        int hitCount = 0;
+        
 
         // This hook is called whenever the player attacks
         public override void OnHitNPC(Player player, NPC target, int damage, float knockback, bool crit)
         {
+            // Count the number of hits
+            int hitCount = 0;
+
             // Increment the hit count
             hitCount++;
 
             // If the hit count is 3, reset it and give the player a buff
             if (hitCount >= 3)
             {
-                hitCount = 0;
+                hitCount -= hitCount; 
                 player.AddBuff(BuffID.Wrath, 600);
             }
         }

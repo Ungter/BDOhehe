@@ -21,9 +21,9 @@ namespace BDOhehe.Items.Materials
             Item.height = 40;
             Item.useTime = 20;
             Item.useAnimation = 20;
-            Item.useStyle = 1;
+            Item.useStyle = ItemUseStyleID.Swing;
             Item.value = 10000;
-            Item.rare = 2;
+            Item.rare = ItemRarityID.Green;
             Item.autoReuse = true;
             Item.maxStack = 999;
         }
@@ -41,5 +41,7 @@ namespace BDOhehe.Items.Materials
             recipe.AddTile(TileID.Anvils);
             recipe.Register();
         }
+
+    
     }
 }
