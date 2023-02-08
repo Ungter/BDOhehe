@@ -1,0 +1,3 @@
+displayName = Revive my dead bdo project
+author = Ungter
+version = 0.1
