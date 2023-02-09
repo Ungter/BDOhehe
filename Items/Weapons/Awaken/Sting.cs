@@ -3,7 +3,6 @@ using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
 using System;
-using System.Runtime.CompilerServices;
 
 namespace BDOhehe.Items.Weapons.Awaken { 
 
@@ -22,14 +21,15 @@ namespace BDOhehe.Items.Weapons.Awaken {
             Item.width = 60;
             Item.height = 30;
             Item.useTime = 30;
-            Item.useAnimation = 30;
-            Item.useStyle = 3;
+            Item.useAnimation = 10;
+            Item.useStyle = ItemUseStyleID.Thrust;
             Item.knockBack = 6;
             Item.value = 10000;
-            Item.rare = 4;
+            Item.rare = ItemRarityID.LightRed;
             Item.UseSound = SoundID.AbigailAttack;
-            Item.autoReuse = true;
+            Item.autoReuse = false;
         }
+
 
 
         public override void AddRecipes()
@@ -43,19 +43,21 @@ namespace BDOhehe.Items.Weapons.Awaken {
         // Listens for the keys A and D, when pressed, it will change the direction the player is facing respectivly 
         public override void HoldItem(Player player)
         {
-            if (Main.keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.A))
+            // Supposed to center the sprite but it's not working
+            player.itemLocation.X = player.position.X;
+            player.itemLocation.Y = player.position.Y;
+
+            // Turns player to the left or right depending on the cursor and where it's pressed
+            // along with A and D keys
+            if (Main.keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.A) ||
+                (Main.mouseLeft && Main.mouseX <= Main.screenWidth / 2) ) 
             {
                 player.direction = -1;
+                
+
             }
-            if (Main.keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.D))
-            {
-                player.direction = 1;
-            }
-            if (Main.mouseX < Main.screenWidth / 2)
-            {
-                player.direction = -1;
-            }
-            else
+            if (Main.keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.D) ||
+                (Main.mouseLeft && Main.mouseX >= Main.screenWidth / 2))
             {
                 player.direction = 1;
             }
@@ -69,10 +71,6 @@ namespace BDOhehe.Items.Weapons.Awaken {
             float rot = diff.ToRotation() - MathHelper.PiOver2;
             player.itemRotation = (float)Math.Atan2(diff.Y * player.direction, diff.X * player.direction);
         }
-
-       
-
-        
 
         // This hook is called whenever the player attacks
         public override void OnHitNPC(Player player, NPC target, int damage, float knockback, bool crit)
@@ -100,8 +98,5 @@ namespace BDOhehe.Items.Weapons.Awaken {
                 Dust.NewDust(new Vector2(hitbox.X, hitbox.Y), hitbox.Width, hitbox.Height, DustID.BubbleBurst_Purple);
             }
         }
-
-
-
     }
 }

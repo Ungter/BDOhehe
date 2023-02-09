@@ -31,9 +31,9 @@ namespace BDOhehe.Items.Armour
 
         public override void UpdateEquip(Player player)
         {
-            if ((player.armor[1].type == ModContent.ItemType<Items.Armour.TalisBody>()) && 
-                (player.armor[2].type == ModContent.ItemType<Items.Armour.TalisShoes>()) && 
-                (player.armor[0].type == ModContent.ItemType<Items.Armour.TalisHead>()))
+            if ((player.armor[1].type == ModContent.ItemType<TalisBody>()) && 
+                (player.armor[2].type == ModContent.ItemType<TalisShoes>()) && 
+                (player.armor[0].type == ModContent.ItemType<TalisHead>()))
             {
                 player.setBonus = "+10% movement speed";
                 player.moveSpeed += 0.1f;

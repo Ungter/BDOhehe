@@ -32,9 +32,9 @@ namespace BDOhehe.Items.Armour
 
         public override void UpdateEquip(Player player)
         {
-            if ((player.armor[0].type == ModContent.ItemType<Items.Armour.TalisHead>()) &&
-                 (player.armor[1].type == ModContent.ItemType<Items.Armour.TalisBody>()) &&
-                 (player.armor[2].type == ModContent.ItemType<Items.Armour.TalisShoes>()))
+            if ((player.armor[0].type == ModContent.ItemType<TalisHead>()) &&
+                 (player.armor[1].type == ModContent.ItemType<TalisBody>()) &&
+                 (player.armor[2].type == ModContent.ItemType<TalisShoes>()))
             {
                 player.setBonus = "+10% movement speed";
                 player.moveSpeed += 0.1f;
@@ -42,15 +42,13 @@ namespace BDOhehe.Items.Armour
             player.moveSpeed += 0.20f;
         }
 
-        
-
         public override void AddRecipes()
         {
             Recipe recipe = CreateRecipe();
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.SoftHide>(), 20);
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.IronIngot>(), 8);
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.BlackStonePow>(), 20);
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.RedCrystal>(), 1);
+            recipe.AddIngredient(ModContent.ItemType<Materials.SoftHide>(), 20);
+            recipe.AddIngredient(ModContent.ItemType<Materials.IronIngot>(), 8);
+            recipe.AddIngredient(ModContent.ItemType<Materials.BlackStonePow>(), 20);
+            recipe.AddIngredient(ModContent.ItemType<Materials.RedCrystal>(), 1);
             recipe.AddTile(TileID.Anvils);
             recipe.Register();
         }
