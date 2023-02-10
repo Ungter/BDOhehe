@@ -9,7 +9,6 @@ namespace BDOhehe.Items.Armour
 {
     internal class TalisShoes : ModItem
     {
-        // basic armor
         public override void SetStaticDefaults()
         {
             DisplayName.SetDefault("Talis Shoes");
@@ -52,8 +51,5 @@ namespace BDOhehe.Items.Armour
             recipe.AddTile(TileID.Anvils);
             recipe.Register();
         }
-
-
-
     }
 }

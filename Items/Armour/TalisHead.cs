@@ -25,7 +25,7 @@ namespace BDOhehe.Items.Armour
             Item.rare = ItemRarityID.Green;
             Item.defense = 4;
             Item.bodySlot = -1;
-            Item.shoeSlot = -1;
+            Item.legSlot = -1;
             Item.headSlot = 0;
         }
 

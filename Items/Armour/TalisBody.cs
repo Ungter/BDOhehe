@@ -42,15 +42,13 @@ namespace BDOhehe.Items.Armour
             player.manaRegenBonus = (int) (2.875 + 11.75 * (player.statMana/player.statManaMax)); 
         }
 
-        
-
         public override void AddRecipes()
         {
             Recipe recipe = CreateRecipe();
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.SoftHide>(), 20);
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.IronIngot>(), 12);
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.BlackStonePow>(), 30);
-            recipe.AddIngredient(ModContent.ItemType<Items.Materials.RedCrystal>(), 2);
+            recipe.AddIngredient(ModContent.ItemType<Materials.SoftHide>(), 20);
+            recipe.AddIngredient(ModContent.ItemType<Materials.IronIngot>(), 12);
+            recipe.AddIngredient(ModContent.ItemType<Materials.BlackStonePow>(), 30);
+            recipe.AddIngredient(ModContent.ItemType<Materials.RedCrystal>(), 2);
             recipe.AddTile(TileID.Anvils);
             recipe.Register();
         }
