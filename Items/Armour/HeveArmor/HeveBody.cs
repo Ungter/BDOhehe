@@ -19,7 +19,7 @@ namespace BDOhehe.Items.Armour.HeveArmor
                                "Armor blessed by Hebe, the goddess of youth.");
         }
 
-        public override void SetDefaults()
+            public override void SetDefaults()
         {
             Item.width = 22;
             Item.height = 22;
@@ -27,7 +27,7 @@ namespace BDOhehe.Items.Armour.HeveArmor
             Item.rare = ItemRarityID.Green;
             Item.defense = 15;
             Item.bodySlot = 0;
-            Item.legSlot = -1;
+              Item.legSlot = -1;
             Item.headSlot = -1;
         }
 
@@ -45,10 +45,12 @@ namespace BDOhehe.Items.Armour.HeveArmor
         public override void OnHitNPC(Player player, NPC target, int damage, float knockBack, bool crit)
         {
             if ((player.armor[1].type == ModContent.ItemType<HeveBody>()) &&
-                 (player.armor[2].type == ModContent.ItemType<HeveShoes>()) &&
-                 (player.armor[0].type == ModContent.ItemType<HeveHelm>()))
+                 player.armor[0].type == ModContent.ItemType<HeveHelm>() &&
+                 player.armor[2].type == ModContent.ItemType<HeveShoes>())
             {
                 target.AddBuff(BuffID.OnFire, 180);
+                target.AddBuff(BuffID.CursedInferno, 20);
+                
             }
         }
 

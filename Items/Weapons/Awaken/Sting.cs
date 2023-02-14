@@ -3,6 +3,8 @@ using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
 using System;
+using BDOhehe.Items.Armour.HeveArmor;
+using rail;
 
 namespace BDOhehe.Items.Weapons.Awaken { 
 
@@ -47,6 +49,15 @@ namespace BDOhehe.Items.Weapons.Awaken {
             player.itemLocation.X = player.position.X;
             player.itemLocation.Y = player.position.Y;
 
+            int swingCount = 0;
+
+            if (Main.mouseLeft) swingCount++;
+
+            if (swingCount == 4)
+            {
+                player.position.X += 4;
+            }
+
             // Turns player to the left or right depending on the cursor and where it's pressed
             // along with A and D keys
             if (Main.keyState.IsKeyDown(Microsoft.Xna.Framework.Input.Keys.A) ||
@@ -75,7 +86,11 @@ namespace BDOhehe.Items.Weapons.Awaken {
         // This hook is called whenever the player attacks
         public override void OnHitNPC(Player player, NPC target, int damage, float knockback, bool crit)
         {
-            // Count the number of hits
+            if (isArmorSet(player)) 
+            {
+                target.AddBuff(BuffID.OnFire, 180);
+            }
+            
             int hitCount = 0;
 
             // Increment the hit count
@@ -83,9 +98,14 @@ namespace BDOhehe.Items.Weapons.Awaken {
 
             // If the hit count is 3, reset it and give the player a buff
             if (hitCount >= 3)
-            {
-                hitCount -= hitCount; 
+            { 
                 player.AddBuff(BuffID.Wrath, 600);
+            }
+
+            if (hitCount >= 10)
+            {
+                hitCount = 0;
+                player.AddBuff(BuffID.IceQueenPet, 600);
             }
         }
 
@@ -97,6 +117,14 @@ namespace BDOhehe.Items.Weapons.Awaken {
             {
                 Dust.NewDust(new Vector2(hitbox.X, hitbox.Y), hitbox.Width, hitbox.Height, DustID.BubbleBurst_Purple);
             }
+        }
+
+        public Boolean isArmorSet(Player player)
+        {
+            return (player.armor[0].type == ModContent.ItemType<HeveHelm>() &&
+                player.armor[1].type == ModContent.ItemType<HeveBody>() &&
+                player.armor[2].type == ModContent.ItemType<HeveShoes>());
+            
         }
     }
 }
