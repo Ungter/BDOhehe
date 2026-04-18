@@ -13,11 +13,6 @@ namespace BDOhehe.Items.Armour.HeveArmor
 
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Strength Helmet of Heve");
-            Tooltip.SetDefault("-10% Movement Speed\n" +
-                               "Set Bonus: +50 Max HP\n" +
-                               "Melee Inflects On Fire!\n" +
-                               "Armor blessed by Hebe, the goddess of youth.");
         }
 
         public override void SetDefaults()

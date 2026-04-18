@@ -11,10 +11,6 @@ namespace BDOhehe.Items.Armour
     {
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Talis Head");
-            Tooltip.SetDefault(
-                                "\nThis armor has reduced defense in return for better flexibility. Mostly worn by nobles." +
-                                "\nEquipping 3 parts will trigger the set effect");
         }
 
         public override void SetDefaults()

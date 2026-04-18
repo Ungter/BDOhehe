@@ -3,8 +3,8 @@
     "Terraria": {
       "commandName": "Executable",
       "executablePath": "dotnet",
-      "commandLineArgs": "$(tMLPath)",
-      "workingDirectory": "$(tMLSteamPath)"
+      "commandLineArgs": "H:\\SteamLibrary\\steamapps\\common\\tModLoader\\tModLoader.dll",
+      "workingDirectory": "H:\\SteamLibrary\\steamapps\\common\\tModLoader"
     },
     "TerrariaServer": {
       "commandName": "Executable",

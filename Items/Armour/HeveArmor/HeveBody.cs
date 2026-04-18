@@ -13,10 +13,6 @@ namespace BDOhehe.Items.Armour.HeveArmor
     {
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Strength Shoes of Heve");
-            Tooltip.SetDefault("Set Bonus: +50 Max HP\n" +
-                               "Melee Inflects On Fire!\n" +
-                               "Armor blessed by Hebe, the goddess of youth.");
         }
 
             public override void SetDefaults()
@@ -42,7 +38,7 @@ namespace BDOhehe.Items.Armour.HeveArmor
             player.moveSpeed -= 0.1f;
         }
 
-        public override void OnHitNPC(Player player, NPC target, int damage, float knockBack, bool crit)
+        public override void OnHitNPC(Player player, NPC target, NPC.HitInfo hit, int damageDone)
         {
             if ((player.armor[1].type == ModContent.ItemType<HeveBody>()) &&
                  player.armor[0].type == ModContent.ItemType<HeveHelm>() &&
@@ -50,7 +46,7 @@ namespace BDOhehe.Items.Armour.HeveArmor
             {
                 target.AddBuff(BuffID.OnFire, 180);
                 target.AddBuff(BuffID.CursedInferno, 20);
-                
+
             }
         }
 

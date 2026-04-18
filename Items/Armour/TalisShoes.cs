@@ -11,9 +11,6 @@ namespace BDOhehe.Items.Armour
     {
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Talis Shoes");
-            Tooltip.SetDefault("+10% Movement Speed" +
-                               "\nThis armor has reduced defense in return for better flexibility. Mostly worn by nobles.");
         }
 
         public override void SetDefaults()

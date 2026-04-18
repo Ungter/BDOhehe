@@ -11,8 +11,6 @@ namespace BDOhehe.Items.Materials
     {
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Black Stone Powder"); 
-            Tooltip.SetDefault("You feel a faint flow of power running through these tiny shards.");
         }
          
         public override void SetDefaults()

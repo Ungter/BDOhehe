@@ -1,0 +1,75 @@
+Items: {
+	HeveBody: {
+		DisplayName: Heve Body
+		Tooltip: ""
+	}
+
+	HeveHelm: {
+		DisplayName: Heve Helm
+		Tooltip: ""
+	}
+
+	HeveShoes: {
+		DisplayName: Heve Shoes
+		Tooltip: ""
+	}
+
+	TalisBody: {
+		DisplayName: Talis Body
+		Tooltip: ""
+	}
+
+	TalisHead: {
+		DisplayName: Talis Head
+		Tooltip: ""
+	}
+
+	TalisShoes: {
+		DisplayName: Talis Shoes
+		Tooltip: ""
+	}
+
+	BroadSword: {
+		DisplayName: Broad Sword
+		Tooltip: ""
+	}
+
+	BlackStonePow: {
+		DisplayName: Black Stone Pow
+		Tooltip: ""
+	}
+
+	IronIngot: {
+		DisplayName: Iron Ingot
+		Tooltip: ""
+	}
+
+	RedCrystal: {
+		DisplayName: Red Crystal
+		Tooltip: ""
+	}
+
+	SoftHide: {
+		DisplayName: Soft Hide
+		Tooltip: ""
+	}
+
+	Sting: {
+		DisplayName: Sting
+		Tooltip: ""
+	}
+}
+
+Buffs: {
+	CometCooldown: {
+		DisplayName: Comet Cooldown
+		Description: Mods.BDOhehe.Buffs.CometCooldown.Description
+	}
+
+	FrozenRingCooldown: {
+		DisplayName: Frozen Ring Cooldown
+		Description: Mods.BDOhehe.Buffs.FrozenRingCooldown.Description
+	}
+}
+
+Projectiles.FrozenRing.DisplayName: Frozen Ring

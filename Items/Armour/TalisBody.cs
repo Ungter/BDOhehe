@@ -11,10 +11,6 @@ namespace BDOhehe.Items.Armour
     {
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Talis Armor");
-            Tooltip.SetDefault( "Increased mana regen rate" +
-                                "\nThis armor has reduced defense in return for better flexibility. Mostly worn by nobles." +
-                                "\nEquipping 3 parts will trigger the set effect");
         }
 
         public override void SetDefaults()
@@ -31,15 +27,15 @@ namespace BDOhehe.Items.Armour
 
         public override void UpdateEquip(Player player)
         {
-            if ((player.armor[1].type == ModContent.ItemType<TalisBody>()) && 
-                (player.armor[2].type == ModContent.ItemType<TalisShoes>()) && 
+            if ((player.armor[1].type == ModContent.ItemType<TalisBody>()) &&
+                (player.armor[2].type == ModContent.ItemType<TalisShoes>()) &&
                 (player.armor[0].type == ModContent.ItemType<TalisHead>()))
             {
                 player.setBonus = "+10% movement speed";
                 player.moveSpeed += 0.1f;
             }
 
-            player.manaRegenBonus = (int) (2.875 + 11.75 * (player.statMana/player.statManaMax)); 
+            player.manaRegenBonus = (int)(2.875 + 11.75 * (player.statMana / player.statManaMax));
         }
 
         public override void AddRecipes()

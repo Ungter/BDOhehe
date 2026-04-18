@@ -11,8 +11,6 @@ namespace BDOhehe.Items.Materials
     {
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Iron Ingot"); 
-            Tooltip.SetDefault("A processed natural resource obtained through smelting iron ore.");
         }
          
         public override void SetDefaults()
@@ -21,9 +19,9 @@ namespace BDOhehe.Items.Materials
             Item.height = 40;
             Item.useTime = 20;
             Item.useAnimation = 20;
-            Item.useStyle = 1;
+            Item.useStyle = ItemUseStyleID.Swing;
             Item.value = 10000;
-            Item.rare = 2;
+            Item.rare = ItemRarityID.Green;
             Item.autoReuse = true;
             Item.maxStack = 999;
         }

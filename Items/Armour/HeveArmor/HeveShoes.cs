@@ -12,11 +12,6 @@ namespace BDOhehe.Items.Armour.HeveArmor
     {
         public override void SetStaticDefaults()
         {
-            DisplayName.SetDefault("Strength Shoes of Heve");
-            Tooltip.SetDefault("+20 Max HP\n" +
-                               "Set Bonus: +50 Max HP\n" +
-                               "Melee Inflects On Fire!\n" +
-                               "Striders blessed by Hebe, the goddess of youth.");
         }
 
         public override void SetDefaults()
