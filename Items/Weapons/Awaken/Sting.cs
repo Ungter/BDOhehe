@@ -18,7 +18,7 @@ namespace BDOhehe.Items.Weapons.Awaken
         private int comboStep = 0;
         private int currentSwing = 0;
 
-        // Comet skill: dash toward the cursor while holding Shift during an attack.
+        // Comet skill: dash toward the cursor while holding F during an attack.
         // The 4th swing uses a propel velocity of 8f, so this skill uses 3x = 24f.
         private const float ShiftDashVelocity = 24f;
         private const int ShiftDashDuration = 20;    // frames the skill animation runs
@@ -27,11 +27,9 @@ namespace BDOhehe.Items.Weapons.Awaken
         private const float ShiftDashMomentumRetention = 0.4f;
         private int shiftDashTimer = 0;
         private Vector2 shiftDashDirection = Vector2.UnitX;
-        // Input buffer so Frozen Ring isn't misread as a Comet. We require Shift to
-        // have been continuously held for at least this many ticks (60ms @ 60
-        // ticks/sec ≈ 4 ticks) before a Comet can fire.
-        private const int ShiftQBufferFrames = 2;
-        private int shiftHeldFrames = 0;
+        // Small input buffer so a stray 1-frame F tap doesn't fire a Comet.
+        private const int CometBufferFrames = 2;
+        private int cometKeyHeldFrames = 0;
 
         // Frozen Ring skill: throw the sword and spin it in the air for 4 seconds
         // while the player stays locked in place. The position-lock and any-button
@@ -43,6 +41,14 @@ namespace BDOhehe.Items.Weapons.Awaken
         private const int SpinSkillCancelGrace = 3;         // frames before cancel input is read
         private const float SpinSkillThrowSpeed = 10f;
         private bool prevQDown = false;
+
+        // Starfall skill: Shift + right-click summons 5 slim purple cones above the
+        // player's head that, after a short delay, launch toward the initial cursor
+        // position. Cancellable by other skills (projectiles fade out instead of
+        // being killed instantly).
+        private const int StarfallConeCount = 5;
+        private const int StarfallCooldownTicks = 360; // 6 seconds
+        private bool prevMouseRightDown = false;
 
         public override void SetStaticDefaults()
         {
@@ -79,23 +85,23 @@ namespace BDOhehe.Items.Weapons.Awaken
         // the player actually is on-screen and only updated on click).
         public override void HoldItem(Player player)
         {
-            // Track how long Shift has been continuously held so we can tell
-            // a plain Comet apart from a Frozen Ring combo (60ms input buffer).
-            bool shiftHeldNow =
-                Main.keyState.IsKeyDown(Keys.LeftShift) ||
-                Main.keyState.IsKeyDown(Keys.RightShift);
-            shiftHeldFrames = shiftHeldNow ? shiftHeldFrames + 1 : 0;
+            // Track how long the Comet key (F) has been continuously held so a
+            // one-frame tap doesn't accidentally fire a Comet.
+            bool cometKeyHeldNow = Main.keyState.IsKeyDown(Keys.F);
+            cometKeyHeldFrames = cometKeyHeldNow ? cometKeyHeldFrames + 1 : 0;
 
             // ---- Comet skill timers / momentum bleed ----
             bool dashJustEnded = false;
             if (shiftDashTimer > 0)
             {
                 shiftDashTimer--;
+                player.noKnockback = true;
                 if (shiftDashTimer == 0) dashJustEnded = true;
             }
             if (dashJustEnded)
             {
                 player.velocity *= ShiftDashMomentumRetention;
+                player.noKnockback = false;
             }
 
             // ---- Frozen Ring skill trigger ----
@@ -104,11 +110,84 @@ namespace BDOhehe.Items.Weapons.Awaken
             // ---- Comet during cancellable Frozen Ring ----
             TryDashDuringSpin(player);
 
+            // ---- Starfall skill trigger (Shift + right-click) ----
+            TryTriggerStarfall(player);
+
             // Don't flip facing while any skill is playing.
             if (shiftDashTimer == 0 && !IsSpinSkillActive(player))
             {
                 player.direction = Main.MouseWorld.X < player.Center.X ? -1 : 1;
             }
+        }
+
+        // Returns true while any Starfall cone projectile owned by this player is alive.
+        private static bool IsStarfallActive(Player player)
+        {
+            return player.ownedProjectileCounts[ModContent.ProjectileType<StarfallCone>()] > 0;
+        }
+
+        // Start the fade-out animation on every Starfall cone this player owns.
+        // Used by every other skill trigger to cleanly interrupt Starfall without
+        // instantly popping the projectiles out of existence.
+        private static void FadeStarfall(Player player)
+        {
+            int type = ModContent.ProjectileType<StarfallCone>();
+            for (int i = 0; i < Main.maxProjectiles; i++)
+            {
+                Projectile p = Main.projectile[i];
+                if (p.active && p.owner == player.whoAmI && p.type == type &&
+                    p.ModProjectile is StarfallCone cone && !cone.Fading)
+                {
+                    cone.Fading = true;
+                }
+            }
+        }
+
+        private void TryTriggerStarfall(Player player)
+        {
+            bool shiftHeld =
+                Main.keyState.IsKeyDown(Keys.LeftShift) ||
+                Main.keyState.IsKeyDown(Keys.RightShift);
+            bool mouseRightDown = Main.mouseRight;
+            bool mouseRightJustPressed = mouseRightDown && !prevMouseRightDown;
+            prevMouseRightDown = mouseRightDown;
+
+            if (!mouseRightJustPressed || !shiftHeld) return;
+
+            // Don't overlap with other active skills.
+            if (shiftDashTimer > 0) return;
+            if (IsSpinSkillActive(player)) return;
+            if (IsStarfallActive(player)) return;
+
+            int cooldownBuff = ModContent.BuffType<StarfallCooldown>();
+            if (player.HasBuff(cooldownBuff)) return;
+
+            Vector2 targetPos = Main.MouseWorld;
+            int projType = ModContent.ProjectileType<StarfallCone>();
+
+            for (int i = 0; i < StarfallConeCount; i++)
+            {
+                int idx = Projectile.NewProjectile(
+                    player.GetSource_ItemUse(Item),
+                    player.Center + new Vector2(0f, -90f),
+                    Vector2.Zero,
+                    projType,
+                    Item.damage,
+                    Item.knockBack,
+                    player.whoAmI);
+
+                if (idx >= 0 && idx < Main.maxProjectiles &&
+                    Main.projectile[idx].ModProjectile is StarfallCone cone)
+                {
+                    cone.TargetPosition = targetPos;
+                    cone.ConeIndex = i;
+                }
+            }
+
+            // Face the cursor at activation so the player "aims" the skill.
+            player.direction = targetPos.X < player.Center.X ? -1 : 1;
+
+            player.AddBuff(cooldownBuff, StarfallCooldownTicks);
         }
 
         // Returns true while a Frozen Ring projectile owned by this player is alive.
@@ -137,20 +216,17 @@ namespace BDOhehe.Items.Weapons.Awaken
             return false;
         }
 
-        // Allows triggering shift-dash during a cancellable spin skill.
+        // Allows triggering Comet (dash) during a cancellable spin skill.
         private void TryDashDuringSpin(Player player)
         {
             if (!IsCancellableSpinActive(player)) return;
 
-            bool shiftHeld =
-                Main.keyState.IsKeyDown(Keys.LeftShift) ||
-                Main.keyState.IsKeyDown(Keys.RightShift);
-            bool qHeld = Main.keyState.IsKeyDown(Keys.Q);
+            bool cometKeyHeld = Main.keyState.IsKeyDown(Keys.F);
             int dashCooldownBuff = ModContent.BuffType<CometCooldown>();
             bool onDashCooldown = player.HasBuff(dashCooldownBuff);
-            bool shiftQBufferElapsed = shiftHeldFrames >= ShiftQBufferFrames && !qHeld;
+            bool cometBufferElapsed = cometKeyHeldFrames >= CometBufferFrames;
 
-            if (shiftHeld && shiftQBufferElapsed && shiftDashTimer == 0 && !onDashCooldown)
+            if (cometKeyHeld && cometBufferElapsed && shiftDashTimer == 0 && !onDashCooldown)
             {
                 // Cancel the spin skill first
                 int spinType = ModContent.ProjectileType<FrozenRing>();
@@ -162,6 +238,9 @@ namespace BDOhehe.Items.Weapons.Awaken
                         p.Kill();
                     }
                 }
+
+                // Intentionally do NOT fade Starfall here -- Comet is the one
+                // skill that does not cancel active Starfall cones.
 
                 // Then trigger the dash
                 shiftDashDirection = (Main.MouseWorld - player.Center).SafeNormalize(Vector2.UnitX);
@@ -196,6 +275,9 @@ namespace BDOhehe.Items.Weapons.Awaken
                 shiftDashTimer = 0;
                 player.velocity *= ShiftDashMomentumRetention;
             }
+
+            // Fade out any active Starfall cones (skill transition -> fade).
+            FadeStarfall(player);
 
             // Stop any in-progress swing so the held sword isn't drawn.
             player.itemAnimation = 0;
@@ -282,6 +364,12 @@ namespace BDOhehe.Items.Weapons.Awaken
                 }
             }
 
+            // A fresh swing interrupts any active Starfall -> fade them out.
+            if (IsStarfallActive(player))
+            {
+                FadeStarfall(player);
+            }
+
             // Lock facing to cursor at the start of each swing so the animation
             // stays consistent even if the cursor drifts across the player mid-swing.
             player.direction = Main.MouseWorld.X < player.Center.X ? -1 : 1;
@@ -326,21 +414,21 @@ namespace BDOhehe.Items.Weapons.Awaken
         public override void UseStyle(Player player, Rectangle heldItem)
         {
             // ---- Comet trigger (runs only while a swing is active) ----
-            // Comet only arms during an attack animation; holding Shift alone
+            // Comet only arms during an attack animation; holding F alone
             // never triggers Comet. Skill-chaining into Comet is still possible
             // because UseItem cancels any active Frozen Ring, which then lets the
             // swing's very next frame run UseStyle and fire Comet.
-            bool shiftHeld =
-                Main.keyState.IsKeyDown(Keys.LeftShift) ||
-                Main.keyState.IsKeyDown(Keys.RightShift);
-            bool qHeld = Main.keyState.IsKeyDown(Keys.Q);
+            bool cometKeyHeld = Main.keyState.IsKeyDown(Keys.F);
             int dashCooldownBuff = ModContent.BuffType<CometCooldown>();
             bool onDashCooldown = player.HasBuff(dashCooldownBuff);
-            bool shiftQBufferElapsed = shiftHeldFrames >= ShiftQBufferFrames && !qHeld;
+            bool cometBufferElapsed = cometKeyHeldFrames >= CometBufferFrames;
 
-            if (shiftHeld && shiftQBufferElapsed && shiftDashTimer == 0 &&
+            if (cometKeyHeld && cometBufferElapsed && shiftDashTimer == 0 &&
                 !onDashCooldown && player.itemAnimation > 0)
             {
+                // Intentionally do NOT fade Starfall here -- Comet is the one
+                // skill that does not cancel active Starfall cones.
+
                 shiftDashDirection = (Main.MouseWorld - player.Center).SafeNormalize(Vector2.UnitX);
                 player.velocity = shiftDashDirection * ShiftDashVelocity;
                 player.direction = shiftDashDirection.X < 0 ? -1 : 1;

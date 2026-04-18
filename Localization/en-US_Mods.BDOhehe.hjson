@@ -70,6 +70,14 @@ Buffs: {
 		DisplayName: Frozen Ring Cooldown
 		Description: Mods.BDOhehe.Buffs.FrozenRingCooldown.Description
 	}
+
+	StarfallCooldown: {
+		DisplayName: Starfall Cooldown
+		Description: Mods.BDOhehe.Buffs.StarfallCooldown.Description
+	}
 }
 
-Projectiles.FrozenRing.DisplayName: Frozen Ring
+Projectiles: {
+	FrozenRing.DisplayName: Frozen Ring
+	StarfallCone.DisplayName: Starfall Cone
+}

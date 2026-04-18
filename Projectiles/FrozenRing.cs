@@ -42,6 +42,10 @@ namespace BDOhehe.Projectiles
         private float orbitAngle;
         private bool orbitStarted;
 
+        // Interior AoE: periodically damage all enemies inside the ring.
+        private const int InteriorDamageInterval = 18;
+        private int interiorDamageTimer;
+
         public override string Texture => "BDOhehe/Items/Weapons/Awaken/Sting";
 
         public override void SetDefaults()
@@ -105,6 +109,16 @@ namespace BDOhehe.Projectiles
                 // Orient the blade tangent to the circle (tip leading the motion).
                 float tangentAngle = orbitAngle + MathHelper.PiOver2;
                 Projectile.rotation = tangentAngle - SpriteNaturalAngle;
+
+                // Dense visual explosions inside the ring + AoE damage tick.
+                SpawnInteriorExplosions();
+                Lighting.AddLight(orbitCenter, 0.9f, 0.35f, 1.15f);
+
+                if (--interiorDamageTimer <= 0)
+                {
+                    DamageInteriorNPCs(owner);
+                    interiorDamageTimer = InteriorDamageInterval;
+                }
             }
 
             // Any-button cancel. Only the local player reads its own input.
@@ -136,6 +150,91 @@ namespace BDOhehe.Projectiles
             if (Main.mouseLeft && !StartMouseLeft) return true;
             if (Main.mouseRight && !StartMouseRight) return true;
             return false;
+        }
+
+        // Spawn several dense burst clusters per frame at random points inside
+        // the orbit circle so the ring's interior looks like it's being
+        // continuously detonated with purple energy.
+        private void SpawnInteriorExplosions()
+        {
+            Color veryLight = new Color(235, 215, 255);
+            Color midPurple = new Color(180, 80, 230);
+            Color veryDark = new Color(40, 5, 70);
+
+            // Number of explosion centers per frame.
+            int burstCount = 3;
+            for (int b = 0; b < burstCount; b++)
+            {
+                // Random point strictly inside the orbit (bias toward the middle).
+                float r = Main.rand.NextFloat() * Main.rand.NextFloat() * (OrbitRadius - 18f);
+                float a = Main.rand.NextFloat(MathHelper.TwoPi);
+                Vector2 burstCenter = orbitCenter + new Vector2(
+                    (float)System.Math.Cos(a) * r,
+                    (float)System.Math.Sin(a) * r);
+
+                // Core burst: fast outward purple sparks.
+                int core = 10;
+                for (int i = 0; i < core; i++)
+                {
+                    float ang = MathHelper.TwoPi * i / core + Main.rand.NextFloat(-0.2f, 0.2f);
+                    Vector2 dir = ang.ToRotationVector2();
+                    Color col = Color.Lerp(veryLight, midPurple, Main.rand.NextFloat());
+                    Dust d = Dust.NewDustPerfect(
+                        burstCenter,
+                        DustID.PurpleTorch,
+                        dir * Main.rand.NextFloat(2.5f, 6f),
+                        100,
+                        col,
+                        1.5f + Main.rand.NextFloat() * 0.6f);
+                    d.noGravity = true;
+                    d.fadeIn = 1.1f;
+                }
+
+                // Dark afterburn at the center.
+                for (int i = 0; i < 4; i++)
+                {
+                    Dust d = Dust.NewDustPerfect(
+                        burstCenter + Main.rand.NextVector2Circular(6f, 6f),
+                        DustID.PurpleTorch,
+                        Main.rand.NextVector2Circular(1.5f, 1.5f),
+                        100,
+                        Color.Lerp(midPurple, veryDark, Main.rand.NextFloat()),
+                        1.4f);
+                    d.noGravity = true;
+                }
+
+                // Brief point light at the burst center for a flash effect.
+                Lighting.AddLight(burstCenter, 0.8f, 0.25f, 1.0f);
+            }
+        }
+
+        // Apply a damage tick to every enemy NPC currently inside the orbit
+        // circle. Mirrors the sword projectile's damage number so interior
+        // damage feels equivalent to a direct blade hit.
+        private void DamageInteriorNPCs(Player owner)
+        {
+            float radiusSq = OrbitRadius * OrbitRadius;
+            for (int i = 0; i < Main.maxNPCs; i++)
+            {
+                NPC npc = Main.npc[i];
+                if (!npc.active || npc.friendly || npc.dontTakeDamage ||
+                    npc.immortal || npc.townNPC || npc.CountsAsACritter)
+                    continue;
+
+                // Any part of the NPC hitbox inside the circle counts.
+                Vector2 closest = Vector2.Clamp(orbitCenter, npc.TopLeft, npc.BottomRight);
+                if (Vector2.DistanceSquared(closest, orbitCenter) > radiusSq)
+                    continue;
+
+                int hitDir = npc.Center.X > orbitCenter.X ? 1 : -1;
+                owner.ApplyDamageToNPC(
+                    npc,
+                    Projectile.damage,
+                    Projectile.knockBack * 0.5f,
+                    hitDir,
+                    false,
+                    DamageClass.Melee);
+            }
         }
 
         private void EmitPurpleParticles()
