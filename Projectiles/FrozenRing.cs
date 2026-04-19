@@ -1,9 +1,12 @@
 ﻿using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
+using ReLogic.Utilities;
 using Terraria;
+using Terraria.Audio;
 using Terraria.ID;
 using Terraria.ModLoader;
+using BDOhehe.Particles;
 
 namespace BDOhehe.Projectiles
 {
@@ -32,6 +35,11 @@ namespace BDOhehe.Projectiles
         public HashSet<Keys> StartKeys = new HashSet<Keys>();
         public bool StartMouseLeft;
         public bool StartMouseRight;
+
+        // Wind-up sound slot owned by the Sting item; stopped in OnKill so
+        // cancelling the ring (click-cancel, Comet cancel, or new-swing
+        // cancel) immediately silences the audio.
+        public SlotId SoundSlot;
 
         // Buffer before mouse-down allows skill cancellation (prevents accidental activation).
         private const int SkillCancelBufferFrames = 6;
@@ -142,6 +150,14 @@ namespace BDOhehe.Projectiles
                 SkillCancelBuffer--;
         }
 
+        public override void OnKill(int timeLeft)
+        {
+            if (SoundSlot.IsValid && SoundEngine.TryGetActiveSound(SoundSlot, out var activeSound))
+            {
+                activeSound?.Stop();
+            }
+        }
+
         // Cancel only on a new mouse click. Key presses (WASD, Space, chat,
         // hotbar swaps, etc.) don't kill the Frozen Ring, which makes the cancel
         // intent an explicit click rather than any incidental input.
@@ -152,114 +168,133 @@ namespace BDOhehe.Projectiles
             return false;
         }
 
-        // Spawn several dense burst clusters per frame at random points inside
-        // the orbit circle so the ring's interior looks like it's being
-        // continuously detonated with purple energy.
+        // Smoky purple cloud puffs rolling around inside the orbit ring.
+        // Replaces the old starburst explosion pattern -- this reads as
+        // a roiling storm of cloud rather than discrete firework pops.
         private void SpawnInteriorExplosions()
         {
-            Color veryLight = new Color(235, 215, 255);
-            Color midPurple = new Color(180, 80, 230);
-            Color veryDark = new Color(40, 5, 70);
-
-            // Number of explosion centers per frame.
             int burstCount = 3;
             for (int b = 0; b < burstCount; b++)
             {
-                // Random point strictly inside the orbit (bias toward the middle).
                 float r = Main.rand.NextFloat() * Main.rand.NextFloat() * (OrbitRadius - 18f);
                 float a = Main.rand.NextFloat(MathHelper.TwoPi);
                 Vector2 burstCenter = orbitCenter + new Vector2(
                     (float)System.Math.Cos(a) * r,
                     (float)System.Math.Sin(a) * r);
 
-                // Core burst: fast outward purple sparks.
-                int core = 10;
-                for (int i = 0; i < core; i++)
+                // A few small cloud puffs drifting outward from each burst point.
+                int puffCount = 5;
+                for (int i = 0; i < puffCount; i++)
                 {
-                    float ang = MathHelper.TwoPi * i / core + Main.rand.NextFloat(-0.2f, 0.2f);
+                    float ang = Main.rand.NextFloat(MathHelper.TwoPi);
                     Vector2 dir = ang.ToRotationVector2();
-                    Color col = Color.Lerp(veryLight, midPurple, Main.rand.NextFloat());
-                    Dust d = Dust.NewDustPerfect(
-                        burstCenter,
-                        DustID.PurpleTorch,
-                        dir * Main.rand.NextFloat(2.5f, 6f),
-                        100,
-                        col,
-                        1.5f + Main.rand.NextFloat() * 0.6f);
-                    d.noGravity = true;
-                    d.fadeIn = 1.1f;
+                    float speed = Main.rand.NextFloat(0.6f, 2.8f);
+                    var p = new SmokeParticle(
+                        burstCenter + Main.rand.NextVector2Circular(4f, 4f),
+                        dir * speed,
+                        PurplePalette.RandomCloud(),
+                        1.6f + Main.rand.NextFloat() * 1.2f,
+                        44 + Main.rand.Next(16));
+                    p.GrowthAt1 = 2.0f + Main.rand.NextFloat() * 0.6f;
+                    ParticleSystem.Spawn(p);
                 }
 
-                // Dark afterburn at the center.
-                for (int i = 0; i < 4; i++)
+                // A couple of dark "ink" puffs for depth -- bias the cloud
+                // body darker so overlapping additive puffs don't all average
+                // to the bright end.
+                for (int i = 0; i < 2; i++)
                 {
-                    Dust d = Dust.NewDustPerfect(
+                    var p = new SmokeParticle(
                         burstCenter + Main.rand.NextVector2Circular(6f, 6f),
-                        DustID.PurpleTorch,
-                        Main.rand.NextVector2Circular(1.5f, 1.5f),
-                        100,
-                        Color.Lerp(midPurple, veryDark, Main.rand.NextFloat()),
-                        1.4f);
-                    d.noGravity = true;
+                        Main.rand.NextVector2Circular(0.8f, 0.8f),
+                        PurplePalette.RandomDeep(),
+                        2.0f + Main.rand.NextFloat() * 0.8f,
+                        48 + Main.rand.Next(16));
+                    p.GrowthAt1 = 1.6f;
+                    ParticleSystem.Spawn(p);
                 }
 
-                // Brief point light at the burst center for a flash effect.
-                Lighting.AddLight(burstCenter, 0.8f, 0.25f, 1.0f);
+                Lighting.AddLight(burstCenter, 0.6f, 0.18f, 0.9f);
             }
         }
+
+        // True only for the one tick the interior AoE's Projectile.Damage()
+        // call is running, so the orbiting blade's normal sprite hits aren't
+        // affected by the temporary hitbox expansion below.
+        private bool interiorDetonating;
 
         // Apply a damage tick to every enemy NPC currently inside the orbit
-        // circle. Mirrors the sword projectile's damage number so interior
-        // damage feels equivalent to a direct blade hit.
+        // circle. Uses the canonical "expand hitbox + Projectile.Damage()"
+        // pattern instead of Player.ApplyDamageToNPC so the hit flows through
+        // the normal projectile damage pipeline (tModLoader modifiers, on-hit
+        // callbacks, etc.) and reliably lands on every valid target.
         private void DamageInteriorNPCs(Player owner)
         {
-            float radiusSq = OrbitRadius * OrbitRadius;
-            for (int i = 0; i < Main.maxNPCs; i++)
-            {
-                NPC npc = Main.npc[i];
-                if (!npc.active || npc.friendly || npc.dontTakeDamage ||
-                    npc.immortal || npc.townNPC || npc.CountsAsACritter)
-                    continue;
+            int origW = Projectile.width;
+            int origH = Projectile.height;
+            Vector2 origPos = Projectile.position;
+            int origPenetrate = Projectile.penetrate;
 
-                // Any part of the NPC hitbox inside the circle counts.
-                Vector2 closest = Vector2.Clamp(orbitCenter, npc.TopLeft, npc.BottomRight);
-                if (Vector2.DistanceSquared(closest, orbitCenter) > radiusSq)
-                    continue;
+            int side = (int)(OrbitRadius * 2f);
+            Projectile.position = orbitCenter - new Vector2(OrbitRadius);
+            Projectile.width = side;
+            Projectile.height = side;
+            Projectile.penetrate = -1;
 
-                int hitDir = npc.Center.X > orbitCenter.X ? 1 : -1;
-                owner.ApplyDamageToNPC(
-                    npc,
-                    Projectile.damage,
-                    Projectile.knockBack * 0.5f,
-                    hitDir,
-                    false,
-                    DamageClass.Melee);
-            }
+            // Let every NPC be re-hit by each interior tick regardless of the
+            // usesLocalNPCImmunity cooldown set for the blade's sprite hits.
+            for (int i = 0; i < Projectile.localNPCImmunity.Length; i++)
+                Projectile.localNPCImmunity[i] = 0;
+
+            interiorDetonating = true;
+            Projectile.Damage();
+            interiorDetonating = false;
+
+            Projectile.position = origPos;
+            Projectile.width = origW;
+            Projectile.height = origH;
+            Projectile.penetrate = origPenetrate;
         }
 
+        // During the interior detonation tick we want the engine's default
+        // rect-vs-rect test to use the temporarily expanded hitbox. Outside
+        // that window, fall back to the default (null) behaviour so the
+        // orbiting blade's sprite hits still work normally.
+        public override bool? Colliding(Rectangle projHitbox, Rectangle targetHitbox)
+        {
+            if (interiorDetonating)
+            {
+                // Extra precision: clip targets outside the orbit circle so
+                // the AoE reads as a ring rather than a square box.
+                Vector2 closest = Vector2.Clamp(orbitCenter, targetHitbox.TopLeft(), targetHitbox.BottomRight());
+                float radiusSq = OrbitRadius * OrbitRadius;
+                return Vector2.DistanceSquared(closest, orbitCenter) <= radiusSq;
+            }
+            return null;
+        }
+
+        // Wispy purple aura drifting off the blade. Uses the shared palette
+        // so clouds vary across the full violet->orchid range instead of a
+        // single near-white tint.
         private void EmitPurpleParticles()
         {
-            // Very light purple -> very dark purple gradient
-            Color veryLight = new Color(235, 215, 255);
-            Color veryDark = new Color(30, 0, 50);
-
             for (int i = 0; i < 3; i++)
             {
-                float t = Main.rand.NextFloat();
-                Color dustColor = Color.Lerp(veryLight, veryDark, t);
-
                 Vector2 offset = Main.rand.NextVector2Circular(38f, 38f);
                 float scale = 1.0f + Main.rand.NextFloat() * 1.0f;
 
-                Dust dust = Dust.NewDustPerfect(
+                Color color = Main.rand.NextBool(4)
+                    ? PurplePalette.RandomHighlight()
+                    : PurplePalette.RandomCloud();
+
+                var p = new SmokeParticle(
                     Projectile.Center + offset,
-                    DustID.PurpleTorch,
                     offset.SafeNormalize(Vector2.Zero) * Main.rand.NextFloat(0.4f, 2.2f),
-                    100,
-                    dustColor,
-                    scale);
-                dust.noGravity = true;
-                dust.fadeIn = 0.8f + Main.rand.NextFloat() * 0.6f;
+                    color,
+                    scale,
+                    28 + Main.rand.Next(10));
+                p.GrowthAt1 = 1.7f;
+                ParticleSystem.Spawn(p);
             }
         }
     }

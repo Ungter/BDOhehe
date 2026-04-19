@@ -5,6 +5,7 @@ using Terraria;
 using Terraria.GameContent;
 using Terraria.ID;
 using Terraria.ModLoader;
+using BDOhehe.Particles;
 
 namespace BDOhehe.Projectiles
 {
@@ -21,22 +22,61 @@ namespace BDOhehe.Projectiles
         private const float ConeSpacing = 26f;
         private const int MaxTravelFramesAfterLaunch = 90;
         // Radius (px) of the AoE damage burst when the cone explodes on tile contact.
-        private const int ExplosionRadius = 56;
+        // Tuned to match the outer extent of SpawnImpactBurst's visible cloud
+        // (mid/outer layers with drag-decayed travel + ~half particle width)
+        // so the damage circle matches what the player actually sees.
+        private const int ExplosionRadius = 96;
         // Length of the visual cone; used for tile sampling + line-segment collision.
         private const float ConeHalfLength = 18f;
         private const float ConeHitThickness = 10f;
+
+        // Star's Call only: a second, larger AoE detonates partway through
+        // the fade (< FadeFrames so total animation time is unchanged). It
+        // applies its own damage tick (localNPC immunity is reset) so enemies
+        // are hit twice. Radius is sized to the visible extent of
+        // SpawnSecondaryImpactBurst (bigger particle scales + faster halo).
+        private const int SecondaryExplosionDelayFrames = 12;
+        private const int SecondaryExplosionRadius = 200;
+        private const float SecondaryDamageMultiplier = 1.4f;
 
         public Vector2 TargetPosition;
         public int ConeIndex; // 0..4
         public bool Fading;
 
+        // Star's Call variant: cones spawn in a crown above the cursor and
+        // strike down. When true, we skip the per-frame "hover above player"
+        // repositioning and just respect the spawn position given by the caller.
+        public bool StrikeDownMode;
+
+        // When > 0, overrides the built-in DelayFrames so other skills (e.g.
+        // Star's Call) can use a different delay length.
+        public int DelayOverride;
+
+        // For Star's Call only: wait this many delay frames before the cone
+        // becomes visible / emits trails. Lets the crown fill in left-to-right
+        // across the wind-up instead of appearing all at once. Unused for
+        // regular Starfall (stays 0 = immediate).
+        public int RevealFrame;
+
         private int delayCounter;
         private int fadeCounter;
         private int launchedFrames;
         private bool launched;
+        // Star's Call secondary explosion bookkeeping.
+        private bool secondaryPending;
+        private int secondaryCounter;
+        // True only for the single AI tick the secondary's Projectile.Damage()
+        // call is running. Lets CanHitNPC return the default (allow) even
+        // though the cone is otherwise in the Fading state.
+        private bool secondaryDetonating;
         private Vector2 launchDirection;
         private Vector2 launchOrigin;
         private float targetTravelDistance;
+        // Previous AI tick's center. Used by EmitTrail to fill the gap
+        // between frames when the cone is moving at launch speed (22f/frame)
+        // so the trail reads as continuous rather than as discrete puffs.
+        private Vector2 lastCenter;
+        private bool hasLastCenter;
 
         // Autoload wants a valid texture path. We never actually draw the item sprite
         // because PreDraw returns false and paints a custom slim cone instead.
@@ -70,6 +110,20 @@ namespace BDOhehe.Projectiles
             {
                 fadeCounter++;
                 EmitTrail(0.35f);
+
+                // Secondary Star's Call explosion -- larger radius, bonus
+                // damage tick. Scheduled inside the existing fade window so
+                // total animation time is unchanged.
+                if (secondaryPending)
+                {
+                    secondaryCounter--;
+                    if (secondaryCounter <= 0)
+                    {
+                        SecondaryExplode();
+                        secondaryPending = false;
+                    }
+                }
+
                 // If launched, the engine continues moving by Projectile.velocity on its own.
                 if (fadeCounter >= FadeFrames)
                 {
@@ -81,21 +135,39 @@ namespace BDOhehe.Projectiles
             }
 
             Vector2 toTarget = (TargetPosition - owner.Center).SafeNormalize(new Vector2(0, -1));
-            float aimAngle = toTarget.ToRotation();
 
-            if (delayCounter < DelayFrames)
+            int effectiveDelay = DelayOverride > 0 ? DelayOverride : DelayFrames;
+
+            if (delayCounter < effectiveDelay)
             {
-                // Hover above the player's head in a horizontal row.
-                Vector2 aboveHead = owner.Center + new Vector2(0, -AboveHeadDistance);
-                float horizontalOffset = (ConeIndex - 2) * ConeSpacing;
-                Projectile.Center = aboveHead + new Vector2(horizontalOffset, 0f);
+                if (!StrikeDownMode)
+                {
+                    // Starfall hover: ride above the player's head in a row.
+                    Vector2 aboveHead = owner.Center + new Vector2(0, -AboveHeadDistance);
+                    float horizontalOffset = (ConeIndex - 2) * ConeSpacing;
+                    Projectile.Center = aboveHead + new Vector2(horizontalOffset, 0f);
+                }
+                // else: StrikeDownMode keeps the crown position assigned at spawn.
+
                 Projectile.velocity = Vector2.Zero;
 
                 // Point at the fixed target position.
-                launchDirection = (TargetPosition - Projectile.Center).SafeNormalize(toTarget);
+                Vector2 fallback = StrikeDownMode ? Vector2.UnitY : toTarget;
+                launchDirection = (TargetPosition - Projectile.Center).SafeNormalize(fallback);
                 Projectile.rotation = launchDirection.ToRotation();
 
                 delayCounter++;
+
+                // Star's Call: stay completely silent/invisible until this
+                // cone's reveal frame so the crown appears in sequence.
+                if (StrikeDownMode && delayCounter <= RevealFrame)
+                {
+                    // Reset trail anchor so the first visible frame doesn't
+                    // interpolate a trail line from off-screen.
+                    lastCenter = Projectile.Center;
+                    hasLastCenter = true;
+                    return;
+                }
             }
             else
             {
@@ -174,6 +246,9 @@ namespace BDOhehe.Projectiles
         // looks like it touches an NPC but no hit is registered.
         public override bool? Colliding(Rectangle projHitbox, Rectangle targetHitbox)
         {
+            // Let the engine's default rectangle-vs-rectangle test run during
+            // the secondary detonation so the expanded hitbox actually hits.
+            if (secondaryDetonating) return null;
             if (Fading) return false;
             if (!launched && delayCounter < DelayFrames) return false;
 
@@ -240,125 +315,371 @@ namespace BDOhehe.Projectiles
 
             Projectile.velocity = Vector2.Zero;
             Fading = true;
+
+            // Star's Call: arm a larger secondary detonation that will fire
+            // partway through the fade (stays within the existing fade window
+            // so overall skill timing is unchanged).
+            if (StrikeDownMode)
+            {
+                secondaryPending = true;
+                secondaryCounter = SecondaryExplosionDelayFrames;
+            }
         }
 
+        // Bigger follow-up blast for Star's Call. Temporarily expands the
+        // hitbox and bumps damage, resets per-NPC immunity so enemies already
+        // hit by the primary take another tick, then restores everything.
+        private void SecondaryExplode()
+        {
+            int origW = Projectile.width;
+            int origH = Projectile.height;
+            int origPenetrate = Projectile.penetrate;
+            int origDamage = Projectile.damage;
+            Vector2 origPos = Projectile.position;
+            Vector2 center = Projectile.Center;
+
+            // Allow this explosion to re-hit NPCs already struck by the primary.
+            for (int i = 0; i < Projectile.localNPCImmunity.Length; i++)
+                Projectile.localNPCImmunity[i] = 0;
+
+            Projectile.position = center - new Vector2(SecondaryExplosionRadius);
+            Projectile.width = SecondaryExplosionRadius * 2;
+            Projectile.height = SecondaryExplosionRadius * 2;
+            Projectile.penetrate = -1;
+            Projectile.damage = (int)(origDamage * SecondaryDamageMultiplier);
+
+            // Open the CanHitNPC / Colliding gates for exactly this call so
+            // the fading cone can still deal damage with its secondary burst.
+            secondaryDetonating = true;
+            Projectile.Damage();
+            secondaryDetonating = false;
+
+            Projectile.position = origPos;
+            Projectile.width = origW;
+            Projectile.height = origH;
+            Projectile.penetrate = origPenetrate;
+            Projectile.damage = origDamage;
+
+            SpawnSecondaryImpactBurst();
+            Lighting.AddLight(center, 0.9f, 0.3f, 1.15f);
+        }
+
+        // Larger, denser version of SpawnImpactBurst sized to the secondary
+        // radius. Scales particle counts, travel speeds, and starting radii
+        // so the burst visibly dwarfs the primary without changing its
+        // purple palette or additive feel.
+        private void SpawnSecondaryImpactBurst()
+        {
+            float rMul = SecondaryExplosionRadius / (float)ExplosionRadius; // ~1.85x
+
+            // Dense inner core cloud.
+            for (int i = 0; i < 16; i++)
+            {
+                Vector2 vel = Main.rand.NextVector2Circular(2.2f, 2.2f);
+                var p = new SmokeParticle(
+                    Projectile.Center + Main.rand.NextVector2Circular(10f, 10f),
+                    vel,
+                    PurplePalette.RandomDeep(),
+                    3.8f + Main.rand.NextFloat() * 1.2f,
+                    52 + Main.rand.Next(18));
+                p.GrowthAt1 = 1.8f;
+                ParticleSystem.Spawn(p);
+            }
+
+            // Mid-layer billows pushed outward farther/faster.
+            for (int i = 0; i < 22; i++)
+            {
+                float ang = Main.rand.NextFloat(MathHelper.TwoPi);
+                Vector2 dir = ang.ToRotationVector2();
+                float speed = Main.rand.NextFloat(2.8f, 6.5f);
+                var p = new SmokeParticle(
+                    Projectile.Center + dir * Main.rand.NextFloat(4f, 14f * rMul),
+                    dir * speed,
+                    PurplePalette.RandomCloud(),
+                    3.0f + Main.rand.NextFloat() * 1.2f,
+                    64 + Main.rand.Next(24));
+                p.GrowthAt1 = 2.6f;
+                ParticleSystem.Spawn(p);
+            }
+
+            // Outer orchid/magenta halo.
+            for (int i = 0; i < 18; i++)
+            {
+                float ang = Main.rand.NextFloat(MathHelper.TwoPi);
+                Vector2 dir = ang.ToRotationVector2();
+                float speed = Main.rand.NextFloat(4.5f, 9f);
+                var p = new SmokeParticle(
+                    Projectile.Center + dir * Main.rand.NextFloat(6f, 18f * rMul),
+                    dir * speed,
+                    Color.Lerp(PurplePalette.Orchid, PurplePalette.Magenta, Main.rand.NextFloat()),
+                    2.2f + Main.rand.NextFloat() * 0.8f,
+                    44 + Main.rand.Next(16));
+                p.GrowthAt1 = 3.0f;
+                ParticleSystem.Spawn(p);
+            }
+
+            // Shockwave streaks radiating from the center for extra punch.
+            int streaks = 10;
+            for (int i = 0; i < streaks; i++)
+            {
+                float ang = MathHelper.TwoPi * i / streaks + Main.rand.NextFloat(-0.08f, 0.08f);
+                var streak = new SparkParticle(
+                    Projectile.Center,
+                    Vector2.Zero,
+                    Main.rand.NextBool(2) ? PurplePalette.Lavender : PurplePalette.Orchid,
+                    1.6f, 0.55f,
+                    14 + Main.rand.Next(6));
+                streak.Rotation = ang;
+                streak.LockRotation = true;
+                streak.Drag = 1f;
+                ParticleSystem.Spawn(streak);
+            }
+
+            // Bigger core flash than the primary.
+            var flash = new GlowParticle(
+                Projectile.Center, Vector2.Zero,
+                PurplePalette.Amethyst, 4.8f, 18);
+            flash.CoreWhiteness = 0.2f;
+            flash.CoreIntensity = 0.7f;
+            ParticleSystem.Spawn(flash);
+        }
+
+        // Soft purple cloud burst -- no rigid starburst, no white highlights.
+        // Layered from deep core out to lighter orchid haze so the whole
+        // thing reads as a roiling puff of purple smoke.
         private void SpawnImpactBurst()
         {
-            // Core sparkles.
-            for (int i = 0; i < 14; i++)
-            {
-                Dust dust = Dust.NewDustPerfect(
-                    Projectile.Center,
-                    DustID.PurpleTorch,
-                    Main.rand.NextVector2Circular(3f, 3f),
-                    100,
-                    new Color(210, 130, 245),
-                    1.7f);
-                dust.noGravity = true;
-                dust.fadeIn = 1.2f;
-            }
-
-            // Outward shockwave.
-            for (int i = 0; i < 26; i++)
-            {
-                float angle = MathHelper.TwoPi * i / 26f;
-                Vector2 dir = angle.ToRotationVector2();
-                Dust dust = Dust.NewDustPerfect(
-                    Projectile.Center + dir * 6f,
-                    DustID.PurpleTorch,
-                    dir * Main.rand.NextFloat(4f, 8f),
-                    100,
-                    new Color(230, 170, 255),
-                    1.9f);
-                dust.noGravity = true;
-                dust.fadeIn = 1.3f;
-            }
-
-            // Dark afterburn in the middle.
+            // Dense inner core cloud: dark tones, slow drift.
             for (int i = 0; i < 10; i++)
             {
-                Dust dust = Dust.NewDustPerfect(
-                    Projectile.Center + Main.rand.NextVector2Circular(8f, 8f),
-                    DustID.PurpleTorch,
-                    Main.rand.NextVector2Circular(2f, 2f),
-                    100,
-                    new Color(80, 20, 140),
-                    1.5f);
-                dust.noGravity = true;
+                Vector2 vel = Main.rand.NextVector2Circular(1.4f, 1.4f);
+                var p = new SmokeParticle(
+                    Projectile.Center + Main.rand.NextVector2Circular(6f, 6f),
+                    vel,
+                    PurplePalette.RandomDeep(),
+                    2.8f + Main.rand.NextFloat() * 0.8f,
+                    40 + Main.rand.Next(14));
+                p.GrowthAt1 = 1.6f;
+                ParticleSystem.Spawn(p);
             }
+
+            // Mid-layer billows: royal/amethyst shades expanding outward.
+            for (int i = 0; i < 14; i++)
+            {
+                float ang = Main.rand.NextFloat(MathHelper.TwoPi);
+                Vector2 dir = ang.ToRotationVector2();
+                float speed = Main.rand.NextFloat(1.8f, 4.5f);
+                var p = new SmokeParticle(
+                    Projectile.Center + dir * Main.rand.NextFloat(2f, 10f),
+                    dir * speed,
+                    PurplePalette.RandomCloud(),
+                    2.2f + Main.rand.NextFloat() * 1.0f,
+                    50 + Main.rand.Next(20));
+                p.GrowthAt1 = 2.4f;
+                ParticleSystem.Spawn(p);
+            }
+
+            // Outer wispy halo: lighter orchid/magenta, fast and thin.
+            for (int i = 0; i < 12; i++)
+            {
+                float ang = Main.rand.NextFloat(MathHelper.TwoPi);
+                Vector2 dir = ang.ToRotationVector2();
+                float speed = Main.rand.NextFloat(3f, 6.5f);
+                var p = new SmokeParticle(
+                    Projectile.Center + dir * Main.rand.NextFloat(4f, 12f),
+                    dir * speed,
+                    Color.Lerp(PurplePalette.Orchid, PurplePalette.Magenta, Main.rand.NextFloat()),
+                    1.6f + Main.rand.NextFloat() * 0.6f,
+                    36 + Main.rand.Next(14));
+                p.GrowthAt1 = 2.8f;
+                ParticleSystem.Spawn(p);
+            }
+
+            // A single soft bloom at the epicenter -- not pure white, just
+            // a brighter amethyst to sell the detonation flash.
+            var flash = new GlowParticle(
+                Projectile.Center, Vector2.Zero,
+                PurplePalette.Amethyst, 3.2f, 14);
+            flash.CoreWhiteness = 0.15f;
+            flash.CoreIntensity = 0.5f;
+            ParticleSystem.Spawn(flash);
         }
 
+        // Continuous trail. During the launched phase we draw a sharp, bright
+        // streak aligned with the cone's travel direction (reads like a
+        // laser/comet tail). During delay or fade, we fall back to the
+        // softer smoke puff trail so the "charging" phase stays atmospheric.
+        // Starfall and Star's Call both share this path via StrikeDownMode.
         private void EmitTrail(float intensity)
         {
-            int count = Math.Max(1, (int)Math.Round(3 * intensity));
-            for (int i = 0; i < count; i++)
-            {
-                Vector2 jitter = Main.rand.NextVector2Circular(3f, 3f);
-                Vector2 velocity = launched
-                    ? -Projectile.velocity * 0.12f + Main.rand.NextVector2Circular(0.6f, 0.6f)
-                    : Main.rand.NextVector2Circular(0.3f, 0.3f);
+            Vector2 from = hasLastCenter ? lastCenter : Projectile.Center;
+            Vector2 to = Projectile.Center;
+            float dist = Vector2.Distance(from, to);
 
-                Dust dust = Dust.NewDustPerfect(
-                    Projectile.Center + jitter,
-                    DustID.PurpleTorch,
-                    velocity,
-                    100,
-                    new Color(190, 100, 230),
-                    1.2f);
-                dust.noGravity = true;
-                dust.fadeIn = 1.1f;
+            // Launched-and-moving = sharp streak mode; otherwise smoke.
+            bool sharp = launched && !Fading && Projectile.velocity.LengthSquared() > 0.5f;
+
+            // Sharp streaks want tighter spacing so the line reads as solid;
+            // smoke can stagger farther apart.
+            float stepPx = (sharp ? 3.5f : 5f) / Math.Max(0.2f, intensity);
+            int steps = Math.Max(1, (int)Math.Ceiling(dist / stepPx));
+            if (steps > 40)
+            {
+                steps = 1;
+                from = to;
             }
+
+            if (sharp)
+            {
+                // Travel direction stays constant across all samples this
+                // tick; we lock every streak to it so the trail is a single
+                // coherent bright line, not a sequence of tiny arrows.
+                float travelAngle = Projectile.velocity.ToRotation();
+
+                for (int s = 0; s < steps; s++)
+                {
+                    float t = steps == 1 ? 0.5f : (s + 0.5f) / steps;
+                    Vector2 samplePos = Vector2.Lerp(from, to, t);
+
+                    // Main bright streak: orchid-to-lavender core, narrow
+                    // and elongated for that "energy beam" feel.
+                    Color tint = Main.rand.NextBool(2)
+                        ? PurplePalette.Lavender
+                        : PurplePalette.Orchid;
+                    var streak = new SparkParticle(
+                        samplePos + Main.rand.NextVector2Circular(0.8f, 0.8f),
+                        Vector2.Zero,
+                        tint,
+                        0.9f,          // length (~58 world px per streak)
+                        0.45f,         // thickness (~7 world px)
+                        10 + Main.rand.Next(4));
+                    streak.Rotation = travelAngle;
+                    streak.LockRotation = true;
+                    streak.Drag = 1f;
+                    ParticleSystem.Spawn(streak);
+
+                    // Occasional white-hot hotspot for extra punch - only
+                    // every few samples so we don't wash everything out.
+                    if (s % 3 == 0)
+                    {
+                        var hot = new SparkParticle(
+                            samplePos,
+                            Vector2.Zero,
+                            Color.Lerp(PurplePalette.Lavender, Color.White, 0.35f),
+                            0.55f,      // shorter hot core
+                            0.3f,       // thinner hot core
+                            7);
+                        hot.Rotation = travelAngle;
+                        hot.LockRotation = true;
+                        hot.Drag = 1f;
+                        ParticleSystem.Spawn(hot);
+                    }
+                }
+            }
+            else
+            {
+                for (int s = 0; s < steps; s++)
+                {
+                    float t = steps == 1 ? 0.5f : (s + 0.5f) / steps;
+                    Vector2 samplePos = Vector2.Lerp(from, to, t);
+
+                    Vector2 jitter = Main.rand.NextVector2Circular(3f, 3f);
+                    Vector2 velocity = launched
+                        ? -Projectile.velocity * 0.12f + Main.rand.NextVector2Circular(0.6f, 0.6f)
+                        : Main.rand.NextVector2Circular(0.3f, 0.3f);
+
+                    Color tint = Main.rand.NextBool(3)
+                        ? PurplePalette.RandomHighlight()
+                        : PurplePalette.RandomCloud();
+                    var p = new SmokeParticle(
+                        samplePos + jitter,
+                        velocity,
+                        tint,
+                        1.4f + Main.rand.NextFloat() * 0.5f,
+                        22 + Main.rand.Next(8));
+                    p.GrowthAt1 = 1.8f;
+                    ParticleSystem.Spawn(p);
+                }
+            }
+
+            // Advance the anchor for next frame. Done here (not in AI) since
+            // AI has multiple return paths and EmitTrail is called on each.
+            lastCenter = to;
+            hasLastCenter = true;
         }
 
         public override bool PreDraw(ref Color lightColor)
         {
+            // Star's Call reveal: hide the cone until its sequenced frame.
+            if (StrikeDownMode && !launched && !Fading && delayCounter <= RevealFrame)
+                return false;
+
             float fade = Fading ? 1f - (float)fadeCounter / FadeFrames : 1f;
             if (fade <= 0f) return false;
 
-            Texture2D pixel = TextureAssets.MagicPixel.Value;
+            Texture2D glow = ParticleSystem.GlowStreak;
+            Texture2D orb = ParticleSystem.GlowOrb;
+            if (glow == null || orb == null) return false;
+
             Vector2 drawPos = Projectile.Center - Main.screenPosition;
-            Rectangle src = new Rectangle(0, 0, 1, 1);
-            Vector2 origin = new Vector2(0.5f, 0.5f);
+            Vector2 glowOrigin = new Vector2(glow.Width * 0.5f, glow.Height * 0.5f);
+            Vector2 orbOrigin = new Vector2(orb.Width * 0.5f, orb.Height * 0.5f);
 
-            // The rotation points along the "long axis" of the cone (travel direction).
-            // scale.X = length, scale.Y = thickness.
-            Vector2 coreScale = new Vector2(36f, 4f);
+            // Switch to additive blending so overlapping glows brighten like
+            // energy instead of tinting like paint. Restore the projectile
+            // layer's normal AlphaBlend batch afterward.
+            SpriteBatch sb = Main.spriteBatch;
+            sb.End();
+            sb.Begin(
+                SpriteSortMode.Deferred, BlendState.Additive,
+                SamplerState.LinearClamp, DepthStencilState.None,
+                RasterizerState.CullNone, null,
+                Main.GameViewMatrix.TransformationMatrix);
 
-            // Outer glow halos (additive-looking purple).
-            for (int i = 0; i < 4; i++)
-            {
-                float intensity = 0.32f - i * 0.065f;
-                if (intensity <= 0f) continue;
-                Vector2 glowScale = coreScale + new Vector2(8f + i * 4f, 6f + i * 3f);
-                Main.EntitySpriteDraw(
-                    pixel, drawPos, src,
-                    new Color(160, 60, 220) * intensity * fade,
-                    Projectile.rotation, origin, glowScale,
-                    SpriteEffects.None, 0);
-            }
+            // Outer halo: soft deep violet glow behind the cone.
+            sb.Draw(orb, drawPos, null,
+                PurplePalette.DeepViolet * 0.7f * fade,
+                0f, orbOrigin, 0.75f, SpriteEffects.None, 0f);
 
-            // Bright core stripe.
-            Main.EntitySpriteDraw(
-                pixel, drawPos, src,
-                new Color(235, 190, 255) * fade,
-                Projectile.rotation, origin, coreScale,
-                SpriteEffects.None, 0);
+            // Main cone body: amethyst streak along travel direction.
+            Vector2 coreScale = new Vector2(48f / glow.Width, 14f / glow.Height);
+            sb.Draw(glow, drawPos, null,
+                PurplePalette.Amethyst * fade,
+                Projectile.rotation, glowOrigin, coreScale,
+                SpriteEffects.None, 0f);
 
-            // Tighter white-hot tip along the leading half for a cone-ish highlight.
-            Vector2 tipOffset = new Vector2(coreScale.X * 0.25f, 0f).RotatedBy(Projectile.rotation);
-            Main.EntitySpriteDraw(
-                pixel, drawPos + tipOffset, src,
-                new Color(255, 230, 255) * fade * 0.9f,
-                Projectile.rotation, origin,
-                new Vector2(coreScale.X * 0.55f, 2.2f),
-                SpriteEffects.None, 0);
+            // Brighter orchid inner streak (not white -- keeps the tint
+            // from washing out under additive blending).
+            sb.Draw(glow, drawPos, null,
+                PurplePalette.Orchid * fade,
+                Projectile.rotation, glowOrigin,
+                coreScale * new Vector2(0.7f, 0.45f),
+                SpriteEffects.None, 0f);
+
+            // Leading-tip highlight: lavender (lightest in the palette) so
+            // it reads as a bright point without becoming pure white.
+            Vector2 tipOffset = new Vector2(14f, 0f).RotatedBy(Projectile.rotation);
+            sb.Draw(glow, drawPos + tipOffset, null,
+                PurplePalette.Lavender * fade * 0.8f,
+                Projectile.rotation, glowOrigin,
+                coreScale * new Vector2(0.4f, 0.3f),
+                SpriteEffects.None, 0f);
+
+            sb.End();
+            sb.Begin(
+                SpriteSortMode.Deferred, BlendState.AlphaBlend,
+                SamplerState.LinearClamp, DepthStencilState.None,
+                RasterizerState.CullNone, null,
+                Main.GameViewMatrix.TransformationMatrix);
 
             return false;
         }
 
-        // Don't hit anything after we've started fading.
-        public override bool? CanHitNPC(NPC target) => Fading ? false : (bool?)null;
+        // Don't hit anything after we've started fading, except for the
+        // single tick the Star's Call secondary explosion is firing.
+        public override bool? CanHitNPC(NPC target) =>
+            (Fading && !secondaryDetonating) ? false : (bool?)null;
 
-        public override bool CanHitPvp(Player target) => !Fading;
+        public override bool CanHitPvp(Player target) => !Fading || secondaryDetonating;
     }
 }

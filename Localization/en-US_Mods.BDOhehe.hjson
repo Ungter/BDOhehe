@@ -75,9 +75,15 @@ Buffs: {
 		DisplayName: Starfall Cooldown
 		Description: Mods.BDOhehe.Buffs.StarfallCooldown.Description
 	}
+
+	StarCallCooldown: {
+		DisplayName: Star Call Cooldown
+		Description: Mods.BDOhehe.Buffs.StarCallCooldown.Description
+	}
 }
 
 Projectiles: {
 	FrozenRing.DisplayName: Frozen Ring
 	StarfallCone.DisplayName: Starfall Cone
+	StarCall.DisplayName: Star Call
 }
