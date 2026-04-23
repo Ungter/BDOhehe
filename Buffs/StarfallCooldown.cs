@@ -8,7 +8,7 @@ namespace BDOhehe.Buffs
     // pure visual timer -- it has no gameplay side effects beyond its presence.
     public class StarfallCooldown : ModBuff
     {
-        public override string Texture => "BDOhehe/Items/Weapons/Awaken/Sting";
+        public override string Texture => "BDOhehe/Buffs/StarfallCooldown";
 
         public override void SetStaticDefaults()
         {

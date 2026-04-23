@@ -7,7 +7,7 @@ namespace BDOhehe.Buffs
     // Visible above the player's head with a countdown, like a potion timer.
     public class FrozenRingCooldown : ModBuff
     {
-        public override string Texture => "BDOhehe/Items/Weapons/Awaken/Sting";
+        public override string Texture => "BDOhehe/Buffs/FrozenRingCooldown";
 
         public override void SetStaticDefaults()
         {

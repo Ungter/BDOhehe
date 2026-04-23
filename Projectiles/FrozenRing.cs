@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using ReLogic.Utilities;
 using Terraria;
@@ -45,21 +46,37 @@ namespace BDOhehe.Projectiles
         private const int SkillCancelBufferFrames = 6;
         public int SkillCancelBuffer = SkillCancelBufferFrames;
 
-        // Set the frame the throw phase ends; the sword then orbits this point.
+        // Set the frame the throw phase ends; the sword then spins in place.
         private Vector2 orbitCenter;
-        private float orbitAngle;
         private bool orbitStarted;
+        private int spinFrameCount;
+        private const int TotalSpinFrames = 180; // ~3 seconds at 60fps
 
         // Interior AoE: periodically damage all enemies inside the ring.
         private const int InteriorDamageInterval = 18;
         private int interiorDamageTimer;
 
-        public override string Texture => "BDOhehe/Items/Weapons/Awaken/Sting";
+        // Quick visual fade at the end of the spin phase so the blade and
+        // ring don't pop out of existence. Triggers automatically during the
+        // last FadeOutFrames of Projectile.timeLeft.
+        private const int FadeOutFrames = 14;
+
+        public override string Texture
+        {
+            get
+            {
+                // During the spin phase (after throw), use Sting2.png
+                if (Projectile.ai[0] >= ThrowFrames)
+                    return "BDOhehe/Items/Weapons/Awaken/Sting2";
+                return "BDOhehe/Items/Weapons/Awaken/Sting";
+            }
+        }
 
         public override void SetDefaults()
         {
-            Projectile.width = 60;
-            Projectile.height = 30;
+            Projectile.width = 40;
+            Projectile.height = 40;
+            Projectile.scale = 0.2f;
             Projectile.friendly = true;
             Projectile.hostile = false;
             Projectile.DamageType = DamageClass.Melee;
@@ -68,6 +85,44 @@ namespace BDOhehe.Projectiles
             Projectile.usesLocalNPCImmunity = true;
             Projectile.localNPCHitCooldown = 20;
             Projectile.timeLeft = 240; // overridden by the item on spawn
+        }
+
+        // Fade factor in [0,1]. 1 during normal play, ramps to 0 across the
+        // last FadeOutFrames of the projectile's lifetime.
+        private float FadeAlpha =>
+            Projectile.timeLeft >= FadeOutFrames
+                ? 1f
+                : MathHelper.Clamp(Projectile.timeLeft / (float)FadeOutFrames, 0f, 1f);
+
+        public override bool PreDraw(ref Color lightColor)
+        {
+            // Use Sting2 during spin phase, Sting otherwise
+            string texturePath = Projectile.ai[0] >= ThrowFrames
+                ? "BDOhehe/Items/Weapons/Awaken/Sting2"
+                : "BDOhehe/Items/Weapons/Awaken/Sting";
+
+            Texture2D texture = ModContent.Request<Texture2D>(texturePath).Value;
+            Rectangle sourceRect = new Rectangle(0, 0, texture.Width, texture.Height);
+            Vector2 drawOrigin = new Vector2(texture.Width / 2, texture.Height / 2);
+            Vector2 drawPos = Projectile.Center - Main.screenPosition;
+
+            float fade = FadeAlpha;
+
+            // Sword sprite fades along with the ring.
+            Main.spriteBatch.Draw(texture, drawPos, sourceRect,
+                Projectile.GetAlpha(lightColor) * fade,
+                Projectile.rotation, drawOrigin, Projectile.scale, SpriteEffects.None, 0f);
+
+            // Draw continuously glowing ring during spin phase, matching the
+            // additive-glow treatment used by StarCall / StarfallCone (tangent
+            // GlowStreak segments layered into a soft halo, main amethyst
+            // body, and a bright orchid inner line).
+            if (Projectile.ai[0] >= ThrowFrames && fade > 0f)
+            {
+                DrawGlowRing(orbitCenter, OrbitRadius, fade);
+            }
+
+            return false; // Skip default drawing
         }
 
         public override void AI()
@@ -98,35 +153,48 @@ namespace BDOhehe.Projectiles
             }
             else
             {
-                // On the first frame of the orbit phase, lock in the center point
-                // and compute the starting angle from wherever the sword landed.
+                // On the first frame of the spin phase, lock in the center point.
                 if (!orbitStarted)
                 {
                     Vector2 throwDir = Projectile.velocity.SafeNormalize(Vector2.UnitX);
                     orbitCenter = Projectile.Center + throwDir * OrbitRadius;
-                    orbitAngle = (Projectile.Center - orbitCenter).ToRotation();
                     orbitStarted = true;
                 }
 
-                orbitAngle += OrbitAngularSpeed;
-
-                Vector2 radial = orbitAngle.ToRotationVector2();
-                Projectile.Center = orbitCenter + radial * OrbitRadius;
+                // Keep the projectile at the center and spin the sprite itself
+                Projectile.Center = orbitCenter;
                 Projectile.velocity = Vector2.Zero;
 
-                // Orient the blade tangent to the circle (tip leading the motion).
-                float tangentAngle = orbitAngle + MathHelper.PiOver2;
-                Projectile.rotation = tangentAngle - SpriteNaturalAngle;
+                // Increment spin frame counter
+                spinFrameCount++;
+                Projectile.ai[0] += 1f;
 
-                // Dense visual explosions inside the ring + AoE damage tick.
-                SpawnInteriorExplosions();
-                Lighting.AddLight(orbitCenter, 0.9f, 0.35f, 1.15f);
+                // Spin the sprite while also scaling it up (100% increase over full duration)
+                float spinProgress = (float)spinFrameCount / TotalSpinFrames;
+                float scaleMultiplier = 2.5f + spinProgress; // 1.0x to 2.0x
 
-                if (--interiorDamageTimer <= 0)
+                // Continuous rotation at high speed
+                Projectile.rotation += OrbitAngularSpeed * 1.2f;
+
+                // Apply scaled size
+                Projectile.scale = 0.2f * scaleMultiplier;
+
+                // During the fade-out window, stop spawning fresh interior
+                // bursts / damage ticks and dim the emitted light so the ring
+                // visibly quiets down in lockstep with the visual fade.
+                bool fading = Projectile.timeLeft < FadeOutFrames;
+                if (!fading)
                 {
-                    DamageInteriorNPCs(owner);
-                    interiorDamageTimer = InteriorDamageInterval;
+                    SpawnInteriorExplosions();
+
+                    if (--interiorDamageTimer <= 0)
+                    {
+                        DamageInteriorNPCs(owner);
+                        interiorDamageTimer = InteriorDamageInterval;
+                    }
                 }
+                float lightFade = FadeAlpha;
+                Lighting.AddLight(orbitCenter, 0.9f * lightFade, 0.35f * lightFade, 1.15f * lightFade);
             }
 
             // Any-button cancel. Only the local player reads its own input.
@@ -143,7 +211,10 @@ namespace BDOhehe.Projectiles
                 }
             }
 
-            EmitPurpleParticles();
+            // Halt the wispy blade aura once the fade has begun so puffs
+            // don't linger visibly after the projectile dies.
+            if (Projectile.timeLeft >= FadeOutFrames)
+                EmitPurpleParticles();
 
             // Decrement skill cancel buffer
             if (SkillCancelBuffer > 0)
@@ -273,9 +344,102 @@ namespace BDOhehe.Projectiles
             return null;
         }
 
-        // Wispy purple aura drifting off the blade. Uses the shared palette
-        // so clouds vary across the full violet->orchid range instead of a
-        // single near-white tint.
+        // Continuously glowing full ring built from tangent GlowStreak
+        // segments under additive blending. Three layered passes (soft deep
+        // violet halo, amethyst main body, bright orchid inner line) give the
+        // same "energy beam" feel as StarCall / StarfallCone's cone bodies,
+        // and a subtle sine pulse keeps it breathing while the ring spins.
+        private void DrawGlowRing(Vector2 center, float radius, float fade)
+        {
+            Texture2D glow = ParticleSystem.GlowStreak;
+            Texture2D orb = ParticleSystem.GlowOrb;
+            if (glow == null || orb == null) return;
+
+            SpriteBatch sb = Main.spriteBatch;
+
+            // Switch to additive blending so overlapping glows brighten like
+            // energy instead of tinting like paint. Restore the projectile
+            // layer's normal AlphaBlend batch afterward.
+            sb.End();
+            sb.Begin(
+                SpriteSortMode.Deferred, BlendState.Additive,
+                SamplerState.LinearClamp, DepthStencilState.None,
+                RasterizerState.CullNone, null,
+                Main.GameViewMatrix.TransformationMatrix);
+
+            Vector2 glowOrigin = new Vector2(glow.Width * 0.5f, glow.Height * 0.5f);
+            Vector2 drawCenter = center - Main.screenPosition;
+
+            // Segment count scales with circumference so the streaks stay
+            // overlapped even at larger radii. Each streak is oriented
+            // tangent to the ring and sized to cover the arc between
+            // neighbours (with generous overlap) so the ring reads as a
+            // continuous band rather than discrete pips.
+            int segments = 72;
+            float arcPx = MathHelper.TwoPi * radius / segments;
+            float streakLength = arcPx * 1.8f;
+
+            // Real-time traveling glow: each segment has its own brightness
+            // driven by a phase based on its angular position around the
+            // ring. The phase sweeps over time, so a bright "wave" (actually
+            // two waves, 180 degrees apart) chases itself around the circle
+            // continuously -- no two segments share the same brightness at
+            // the same instant, producing a live gradient rather than a
+            // uniform pulse.
+            float t = Main.GlobalTimeWrappedHourly;
+            // Global flicker still applies on top for organic variation.
+            float flicker = 0.92f + 0.08f * (float)System.Math.Sin(t * 17f);
+            // Speed of the traveling wave around the ring (rad/sec) and a
+            // multiplier on the angle to get two crests per lap.
+            const float WaveSpeed = 2.4f;
+            const int WaveLobes = 2;
+
+            float baseStreakScaleX = streakLength / glow.Width;
+
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = (float)i / segments * MathHelper.TwoPi;
+                Vector2 dir = new Vector2((float)System.Math.Cos(angle), (float)System.Math.Sin(angle));
+                Vector2 pos = drawCenter + dir * radius;
+                float tangent = angle + MathHelper.PiOver2;
+
+                // Per-segment breath: 0 at the wave's trough, 1 at its crest.
+                float wave = 0.5f + 0.5f * (float)System.Math.Sin(angle * WaveLobes - t * WaveSpeed);
+                // Second, slower, offset wave shifts the minimum so no single
+                // spot sits in the dark for long.
+                float wave2 = 0.5f + 0.5f * (float)System.Math.Sin(angle * 3f + t * 1.3f);
+                float breath = MathHelper.Clamp(wave * 0.75f + wave2 * 0.35f, 0f, 1f);
+
+                float pulse = MathHelper.Lerp(0.25f, 1.25f, breath) * flicker;
+                float thick = MathHelper.Lerp(0.8f, 1.25f, breath);
+
+                Vector2 haloScale = new Vector2(baseStreakScaleX, (28f * thick) / glow.Height);
+                Vector2 bodyScale = new Vector2(baseStreakScaleX, (14f * thick) / glow.Height);
+                Vector2 innerScale = new Vector2(baseStreakScaleX, (5f * thick) / glow.Height);
+
+                // Outer soft halo -- breathes the most so the aura swells.
+                sb.Draw(glow, pos, null, PurplePalette.DeepViolet * 0.55f * pulse * fade,
+                    tangent, glowOrigin, haloScale, SpriteEffects.None, 0f);
+
+                // Main amethyst ring body.
+                sb.Draw(glow, pos, null, PurplePalette.Amethyst * 0.75f * pulse * fade,
+                    tangent, glowOrigin, bodyScale, SpriteEffects.None, 0f);
+
+                // Bright orchid inner line -- never fully fades so the ring
+                // silhouette stays readable even at the wave's trough.
+                float innerAlpha = MathHelper.Lerp(0.45f, 1.0f, breath) * flicker;
+                sb.Draw(glow, pos, null, PurplePalette.Orchid * innerAlpha * fade,
+                    tangent, glowOrigin, innerScale, SpriteEffects.None, 0f);
+            }
+
+            sb.End();
+            sb.Begin(
+                SpriteSortMode.Deferred, BlendState.AlphaBlend,
+                SamplerState.LinearClamp, DepthStencilState.None,
+                RasterizerState.CullNone, null,
+                Main.GameViewMatrix.TransformationMatrix);
+        }
+
         private void EmitPurpleParticles()
         {
             for (int i = 0; i < 3; i++)

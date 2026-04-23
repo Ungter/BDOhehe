@@ -105,12 +105,17 @@ namespace BDOhehe.Items.Weapons.Awaken
         {
         }
 
+        // Scale factor to render high-res sprites at reasonable in-game size
+        // 1024x1024 texture / 40x40 original = 25.6x, so we scale down by ~25x
+        private const float SpriteDrawScale = 0.1f;
+
         public override void SetDefaults()
         {
             Item.damage = 50;
             Item.DamageType = DamageClass.Melee;
-            Item.width = 60;
-            Item.height = 30;
+            Item.width = 40;
+            Item.height = 40;
+            Item.scale = SpriteDrawScale;
             Item.useTime = 35;
             Item.useAnimation = 35;
             Item.useStyle = ItemUseStyleID.Swing;
@@ -120,7 +125,6 @@ namespace BDOhehe.Items.Weapons.Awaken
             Item.UseSound = null;
             Item.autoReuse = true;
         }
-
 
 
         public override void AddRecipes()

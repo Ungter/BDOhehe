@@ -9,7 +9,7 @@ namespace BDOhehe.Buffs
     public class CometCooldown : ModBuff
     {
         // Reuse the Sting sprite as the buff icon so we don't need a new texture.
-        public override string Texture => "BDOhehe/Items/Weapons/Awaken/Sting";
+        public override string Texture => "BDOhehe/Buffs/CometCooldown";
 
         public override void SetStaticDefaults()
         {

@@ -7,7 +7,7 @@ namespace BDOhehe.Buffs
     // Displays like the Potion Sickness timer (shows remaining seconds).
     public class StarCallCooldown : ModBuff
     {
-        public override string Texture => "BDOhehe/Items/Weapons/Awaken/Sting";
+        public override string Texture => "BDOhehe/Buffs/StarCallCooldown";
 
         public override void SetStaticDefaults()
         {
